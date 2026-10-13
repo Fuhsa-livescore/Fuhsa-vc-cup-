@@ -13,6 +13,9 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase (for live sync across all phones) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -286,6 +289,45 @@
     </div>
   </div>
 
+  <!-- EVENT MODAL (Goal / Card) -->
+  <div id="event-modal" class="fixed inset-0 bg-black/50 z-[55] hidden flex items-end sm:items-center justify-center p-4">
+    <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+      <div class="px-5 py-4 border-b flex items-center justify-between">
+        <h3 class="text-lg font-bold">Add Goal / Card</h3>
+        <button id="close-event" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <p id="event-match-label" class="text-sm text-slate-500 font-medium"></p>
+        <div>
+          <label class="text-xs font-medium text-slate-500">Type</label>
+          <div class="flex gap-2 mt-1">
+            <button type="button" data-etype="goal" class="event-type-btn flex-1 py-2.5 rounded-xl border-2 border-primary-500 bg-primary-50 text-primary-800 font-semibold text-sm">⚽ Goal</button>
+            <button type="button" data-etype="yellow" class="event-type-btn flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm">🟨 Yellow</button>
+            <button type="button" data-etype="red" class="event-type-btn flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm">🟥 Red</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-500">Team</label>
+          <div class="flex gap-2 mt-1">
+            <button type="button" id="event-team-home" class="event-team-btn flex-1 py-2.5 rounded-xl border-2 border-primary-500 bg-primary-50 text-primary-800 font-semibold text-sm truncate">Home</button>
+            <button type="button" id="event-team-away" class="event-team-btn flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm truncate">Away</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-500">Player Name</label>
+          <input type="text" id="event-player" placeholder="e.g. Ahmed Musa" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-500">Minute</label>
+          <input type="number" id="event-minute" min="1" max="120" placeholder="e.g. 23" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
+        </div>
+        <button id="btn-save-event" class="w-full bg-primary-600 hover:bg-primary-700 text-white font-semibold py-3 rounded-xl">
+          Add Event
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Install banner (bottom) -->
   <div id="install-banner" class="fixed bottom-0 left-0 right-0 bg-primary-800 text-white p-4 shadow-2xl z-40 hidden safe-bottom">
     <div class="max-w-6xl mx-auto flex items-center justify-between gap-3">
@@ -326,8 +368,63 @@
     let deferredPrompt = null;
     let notifPermission = Notification.permission;
 
-    // ===================== STORAGE =====================
-    function loadState() {
+    // ===================== FIREBASE LIVE SYNC =====================
+    // 1. Go to https://console.firebase.google.com
+    // 2. Create a free project → Realtime Database → Start in test mode
+    // 3. Copy your config below (replace the values)
+    const firebaseConfig = {
+      apiKey: "PASTE_YOUR_API_KEY",
+      authDomain: "PASTE_YOUR_AUTH_DOMAIN",
+      databaseURL: "PASTE_YOUR_DATABASE_URL",
+      projectId: "PASTE_YOUR_PROJECT_ID",
+      storageBucket: "PASTE_YOUR_STORAGE_BUCKET",
+      messagingSenderId: "PASTE_YOUR_SENDER_ID",
+      appId: "PASTE_YOUR_APP_ID"
+    };
+
+    let db = null;
+    let isFirebaseReady = false;
+    let isApplyingRemote = false; // prevent loops
+
+    function initFirebase() {
+      // Check if user has filled the config
+      if (firebaseConfig.apiKey === "PASTE_YOUR_API_KEY" || !firebaseConfig.databaseURL.includes("firebaseio.com") && !firebaseConfig.databaseURL.includes("firebasedatabase.app")) {
+        console.warn("Firebase not configured yet – using local storage only");
+        loadLocal();
+        renderAll();
+        return;
+      }
+      try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.database();
+        isFirebaseReady = true;
+
+        // Listen for live changes from any device
+        db.ref('fuhsa_vc_cup').on('value', (snap) => {
+          const data = snap.val();
+          if (!data) return;
+          isApplyingRemote = true;
+          state.teams = data.teams || DEFAULT_TEAMS;
+          state.matches = data.matches || [];
+          // also keep a local cache
+          localStorage.setItem('fuhsa_vc_cup_v1', JSON.stringify({
+            teams: state.teams,
+            matches: state.matches
+          }));
+          renderAll();
+          isApplyingRemote = false;
+        });
+
+        toast("Live sync connected ✓");
+      } catch (e) {
+        console.error("Firebase error", e);
+        loadLocal();
+        renderAll();
+        toast("Live sync failed – using local mode");
+      }
+    }
+
+    function loadLocal() {
       try {
         const saved = localStorage.getItem('fuhsa_vc_cup_v1');
         if (saved) {
@@ -339,10 +436,20 @@
     }
 
     function saveState() {
+      // Always save locally
       localStorage.setItem('fuhsa_vc_cup_v1', JSON.stringify({
         teams: state.teams,
         matches: state.matches
       }));
+
+      // If Firebase is ready and we are the one making the change, push to everyone
+      if (isFirebaseReady && db && !isApplyingRemote) {
+        db.ref('fuhsa_vc_cup').set({
+          teams: state.teams,
+          matches: state.matches,
+          updatedAt: Date.now()
+        }).catch(err => console.warn("Firebase write failed", err));
+      }
     }
 
     // ===================== PWA & NOTIFICATIONS =====================
@@ -520,6 +627,30 @@
         ? new Date(m.datetime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '';
 
+      // Events (goals, cards)
+      const events = m.events || [];
+      let eventsHtml = '';
+      if (events.length > 0) {
+        eventsHtml = `<div class="mt-3 space-y-1 text-xs">` +
+          events.map(e => {
+            const icon = e.type === 'goal' ? '⚽' : e.type === 'yellow' ? '🟨' : '🟥';
+            const side = e.team === 'home' ? m.home : m.away;
+            const name = e.player || 'Unknown';
+            const min = e.minute != null ? e.minute + "'" : '';
+            const delBtn = state.isAdmin
+              ? `<button onclick="removeEvent('${m.id}','${e.id}')" class="text-red-400 hover:text-red-600 ml-1 text-sm leading-none" title="Remove">✕</button>`
+              : '';
+            return `<div class="flex items-center gap-1.5 text-slate-600">
+              <span>${icon}</span>
+              <span class="font-medium">${name}</span>
+              <span class="text-slate-400">(${side})</span>
+              <span class="ml-auto tabular-nums">${min}</span>
+              ${delBtn}
+            </div>`;
+          }).join('') +
+          `</div>`;
+      }
+
       return `
         <div class="match-card bg-white rounded-xl shadow-sm border border-slate-100 p-4" data-id="${m.id}">
           <div class="flex items-center justify-between mb-2">
@@ -538,10 +669,12 @@
               <p class="font-semibold text-sm sm:text-base truncate">${m.away}</p>
             </div>
           </div>
+          ${eventsHtml}
           ${state.isAdmin ? `
-            <div class="mt-3 pt-3 border-t border-slate-100 flex gap-2">
+            <div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
               <button onclick="setLive('${m.id}')" class="text-xs bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">Set Live</button>
               <button onclick="editMatch('${m.id}')" class="text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg font-medium">Edit</button>
+              <button onclick="openEventForm('${m.id}')" class="text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg font-medium">+ Goal / Card</button>
               <button onclick="deleteMatch('${m.id}')" class="text-xs bg-red-50 text-red-600 px-2.5 py-1 rounded-lg font-medium ml-auto">Delete</button>
             </div>
           ` : ''}
@@ -740,7 +873,8 @@
         stage: document.getElementById('m-stage').value,
         group: document.getElementById('m-group').value || null,
         status: newStatus,
-        datetime: document.getElementById('m-datetime').value || null
+        datetime: document.getElementById('m-datetime').value || null,
+        events: (oldMatch && oldMatch.events) ? oldMatch.events : []
       };
 
       if (window._editId) {
@@ -801,6 +935,90 @@
         toast(m.home + ' vs ' + m.away + ' is now LIVE');
         showLocalNotification('🔴 LIVE', `${m.home} vs ${m.away} is now LIVE`);
       }
+    }
+
+    // ========== MATCH EVENTS (Goal / Card) ==========
+    let _eventMatchId = null;
+    let _eventType = 'goal';
+    let _eventTeam = 'home';
+
+    function openEventForm(id) {
+      const m = state.matches.find(x => x.id === id);
+      if (!m) return;
+      _eventMatchId = id;
+      _eventType = 'goal';
+      _eventTeam = 'home';
+      document.getElementById('event-match-label').textContent = m.home + ' vs ' + m.away;
+      document.getElementById('event-team-home').textContent = m.home;
+      document.getElementById('event-team-away').textContent = m.away;
+      document.getElementById('event-player').value = '';
+      document.getElementById('event-minute').value = '';
+      // reset button styles
+      document.querySelectorAll('.event-type-btn').forEach(b => {
+        b.classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
+        b.classList.add('border-slate-200', 'text-slate-600');
+      });
+      document.querySelector('.event-type-btn[data-etype="goal"]').classList.add('border-primary-500', 'bg-primary-50', 'text-primary-800');
+      document.querySelector('.event-type-btn[data-etype="goal"]').classList.remove('border-slate-200', 'text-slate-600');
+      document.getElementById('event-team-home').classList.add('border-primary-500', 'bg-primary-50', 'text-primary-800');
+      document.getElementById('event-team-home').classList.remove('border-slate-200', 'text-slate-600');
+      document.getElementById('event-team-away').classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
+      document.getElementById('event-team-away').classList.add('border-slate-200', 'text-slate-600');
+      document.getElementById('event-modal').classList.remove('hidden');
+    }
+
+    function saveEvent() {
+      const m = state.matches.find(x => x.id === _eventMatchId);
+      if (!m) return;
+      const player = document.getElementById('event-player').value.trim() || 'Unknown';
+      const minute = document.getElementById('event-minute').value ? Number(document.getElementById('event-minute').value) : null;
+
+      if (!m.events) m.events = [];
+      m.events.push({
+        id: uid(),
+        type: _eventType,
+        team: _eventTeam,
+        player,
+        minute
+      });
+
+      // Auto-update score on goal
+      if (_eventType === 'goal') {
+        if (_eventTeam === 'home') m.homeScore = (Number(m.homeScore) || 0) + 1;
+        else m.awayScore = (Number(m.awayScore) || 0) + 1;
+        if (m.status === 'scheduled') m.status = 'live';
+      }
+
+      saveState();
+      renderAll();
+      document.getElementById('event-modal').classList.add('hidden');
+
+      const icon = _eventType === 'goal' ? '⚽' : _eventType === 'yellow' ? '🟨' : '🟥';
+      const teamName = _eventTeam === 'home' ? m.home : m.away;
+      toast(`${icon} ${player} (${teamName})`);
+      if (_eventType === 'goal') {
+        showLocalNotification('⚽ GOAL!', `${player} scores for ${teamName}! ${m.home} ${m.homeScore}–${m.awayScore} ${m.away}`);
+      } else if (_eventType === 'red') {
+        showLocalNotification('🟥 RED CARD', `${player} (${teamName}) sent off`);
+      }
+    }
+
+    function removeEvent(matchId, eventId) {
+      const m = state.matches.find(x => x.id === matchId);
+      if (!m || !m.events) return;
+      const ev = m.events.find(e => e.id === eventId);
+      if (!ev) return;
+
+      // If it was a goal, decrease the score
+      if (ev.type === 'goal') {
+        if (ev.team === 'home') m.homeScore = Math.max(0, (Number(m.homeScore) || 0) - 1);
+        else m.awayScore = Math.max(0, (Number(m.awayScore) || 0) - 1);
+      }
+
+      m.events = m.events.filter(e => e.id !== eventId);
+      saveState();
+      renderAll();
+      toast('Event removed');
     }
 
     function quickSave(id) {
@@ -889,7 +1107,8 @@
               stage: 'Group',
               group: labels[gi],
               status: 'scheduled',
-              datetime: null
+              datetime: null,
+              events: []
             });
           }
         }
@@ -950,7 +1169,8 @@
           stage: firstRoundName,
           group: null,
           status: 'scheduled',
-          datetime: null
+          datetime: null,
+          events: []
         });
       }
 
@@ -973,7 +1193,8 @@
             stage,
             group: null,
             status: 'scheduled',
-            datetime: null
+            datetime: null,
+            events: []
           });
         }
       });
@@ -1058,6 +1279,44 @@
       updateSetupSummary();
     }
 
+    // Event modal (Goal / Card)
+    document.getElementById('close-event').addEventListener('click', () => {
+      document.getElementById('event-modal').classList.add('hidden');
+    });
+    document.getElementById('event-modal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('event-modal')) {
+        document.getElementById('event-modal').classList.add('hidden');
+      }
+    });
+    document.getElementById('btn-save-event').addEventListener('click', saveEvent);
+
+    document.querySelectorAll('.event-type-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _eventType = btn.dataset.etype;
+        document.querySelectorAll('.event-type-btn').forEach(b => {
+          b.classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
+          b.classList.add('border-slate-200', 'text-slate-600');
+        });
+        btn.classList.add('border-primary-500', 'bg-primary-50', 'text-primary-800');
+        btn.classList.remove('border-slate-200', 'text-slate-600');
+      });
+    });
+
+    document.getElementById('event-team-home').addEventListener('click', () => {
+      _eventTeam = 'home';
+      document.getElementById('event-team-home').classList.add('border-primary-500', 'bg-primary-50', 'text-primary-800');
+      document.getElementById('event-team-home').classList.remove('border-slate-200', 'text-slate-600');
+      document.getElementById('event-team-away').classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
+      document.getElementById('event-team-away').classList.add('border-slate-200', 'text-slate-600');
+    });
+    document.getElementById('event-team-away').addEventListener('click', () => {
+      _eventTeam = 'away';
+      document.getElementById('event-team-away').classList.add('border-primary-500', 'bg-primary-50', 'text-primary-800');
+      document.getElementById('event-team-away').classList.remove('border-slate-200', 'text-slate-600');
+      document.getElementById('event-team-home').classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
+      document.getElementById('event-team-home').classList.add('border-slate-200', 'text-slate-600');
+    });
+
     document.getElementById('btn-reset').addEventListener('click', () => {
       if (!confirm('Reset ALL data? This cannot be undone.')) return;
       state.teams = [...DEFAULT_TEAMS];
@@ -1079,8 +1338,11 @@
     });
 
     // ===================== INIT =====================
-    loadState();
-    renderAll();
+    initFirebase();
+    // If Firebase is not configured, loadLocal + render is already called inside initFirebase
+    if (!isFirebaseReady) {
+      // already handled
+    }
 
     // Expose some functions for inline onclick
     window.setLive = setLive;
@@ -1088,6 +1350,8 @@
     window.deleteMatch = deleteMatch;
     window.quickSave = quickSave;
     window.removeTeam = removeTeam;
+    window.openEventForm = openEventForm;
+    window.removeEvent = removeEvent;
   </script>
 </body>
 </html>
