@@ -491,10 +491,37 @@
           }
           renderAll();
         });
+        let lastCloudFingerprint = null;
         cloudUnsubscribe = fbDb.doc(CLOUD_DOC).onSnapshot(doc => {
           if (doc.exists) {
             cloudDocExists = true;
             const data = doc.data() || {};
+            const fingerprint = JSON.stringify({teams:data.teams || [], matches:data.matches || [], updatedAt:data.updatedAt || null});
+            if (lastCloudFingerprint !== null && fingerprint !== lastCloudFingerprint && !state.isAdmin) {
+              const previousMatches = new Map((state.matches || []).map(match => [match.id, match]));
+              const changedMatches = (Array.isArray(data.matches) ? data.matches : []).filter(match => {
+                const old = previousMatches.get(match.id);
+                return !old || old.homeScore !== match.homeScore || old.awayScore !== match.awayScore || old.status !== match.status || JSON.stringify(old.events || []) !== JSON.stringify(match.events || []) || JSON.stringify(old.lineups || {}) !== JSON.stringify(match.lineups || {});
+              });
+              if (notifPermission === 'granted') {
+                if (changedMatches.length) {
+                  const match = changedMatches[changedMatches.length - 1];
+                  const old = previousMatches.get(match.id);
+                  const oldEvents = new Set((old && old.events || []).map(event => event.id));
+                  const newEvent = (match.events || []).slice().reverse().find(event => !oldEvents.has(event.id));
+                  if (newEvent) {
+                    const label = EVENT_LABELS[newEvent.type] || newEvent.type || 'Match updated';
+                    const team = newEvent.team === 'home' ? match.home : newEvent.team === 'away' ? match.away : '';
+                    showLocalNotification(`${EVENT_ICONS[newEvent.type] || '🔔'} ${label}`, `${match.home} ${match.homeScore}–${match.awayScore} ${match.away}${team ? ' · ' + team : ''}${newEvent.player ? ' · ' + newEvent.player : ''}`, `fuhsa-remote-${newEvent.id}`);
+                  } else {
+                    showLocalNotification('🔔 FUHSA Live Score updated', `${match.home} ${match.homeScore}–${match.awayScore} ${match.away} · ${match.status || 'Match updated'}`, `fuhsa-remote-${match.id}-${data.updatedAt || Date.now()}`);
+                  }
+                } else {
+                  showLocalNotification('🔔 FUHSA Live Score updated', 'Tournament information has changed.', `fuhsa-remote-general-${data.updatedAt || Date.now()}`);
+                }
+              }
+            }
+            lastCloudFingerprint = fingerprint;
             // Do not replace local state with an old snapshot while this admin's save is in flight.
             if (!cloudWritePending) {
               state.teams = Array.isArray(data.teams) ? data.teams : DEFAULT_TEAMS;
@@ -1063,8 +1090,12 @@
       saveState();renderAll();document.getElementById('event-modal').classList.add('hidden');
       const label=EVENT_LABELS[_eventType],teamName=global?'':(_eventTeam==='home'?m.home:m.away);
       toast(`${EVENT_ICONS[_eventType]} ${label}${teamName?' · '+teamName:''}`);
-      if(addsGoal||_eventType==='owngoal')showLocalNotification('⚽ GOAL!',`${label}: ${player||'Unknown'} · ${m.home} ${m.homeScore}–${m.awayScore} ${m.away}`);
-      if(_eventType==='fulltime'||_eventType==='shootout_fulltime')showLocalNotification('🏁 FULL-TIME',`${m.home} ${m.homeScore}–${m.awayScore} ${m.away}${m.shootoutHome!=null?' · Shootout '+m.shootoutHome+'–'+m.shootoutAway:''}`);
+      // Notify for every recorded match event, not only goals/full-time.
+      const eventTeamLabel = global ? '' : (_eventTeam === 'home' ? m.home : m.away);
+      const eventMinuteLabel = minute != null ? ` · ${minute}'` : '';
+      let eventBody = `${label}${eventTeamLabel ? ' · ' + eventTeamLabel : ''}${player ? ' · ' + player : ''}${_eventType === 'substitution' && playerOut ? ' off for ' + playerOut : ''}${eventMinuteLabel}. ${m.home} ${m.homeScore}–${m.awayScore} ${m.away}`;
+      if (_eventType === 'shootout_scored' || _eventType === 'shootout_missed') eventBody += ` · Shootout ${m.shootoutHome || 0}–${m.shootoutAway || 0}`;
+      showLocalNotification(`${EVENT_ICONS[_eventType] || '🔔'} ${label}`, eventBody, `fuhsa-event-${ev.id}`);
     }
     function openLineupForm(id){
       const m=state.matches.find(x=>x.id===id);if(!m)return;_lineupMatchId=id;const l=m.lineups||{home:{starting:[],bench:[]},away:{starting:[],bench:[]}};
@@ -1072,7 +1103,7 @@
       document.getElementById('lineup-home-start').value=(l.home.starting||[]).join('\n');document.getElementById('lineup-home-bench').value=(l.home.bench||[]).join('\n');document.getElementById('lineup-away-start').value=(l.away.starting||[]).join('\n');document.getElementById('lineup-away-bench').value=(l.away.bench||[]).join('\n');document.getElementById('lineup-modal').classList.remove('hidden');
     }
     let _lineupMatchId=null;
-    document.getElementById('btn-save-lineup').addEventListener('click',()=>{const m=state.matches.find(x=>x.id===_lineupMatchId);if(!m)return;const lines=id=>document.getElementById(id).value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const hs=lines('lineup-home-start'),as=lines('lineup-away-start');if(hs.length>11||as.length>11){toast('Starting XI can contain a maximum of 11 players per team');return;}m.lineups={home:{starting:hs,bench:lines('lineup-home-bench')},away:{starting:as,bench:lines('lineup-away-bench')}};saveState();renderAll();document.getElementById('lineup-modal').classList.add('hidden');toast('Starting XI and bench saved');});
+    document.getElementById('btn-save-lineup').addEventListener('click',()=>{const m=state.matches.find(x=>x.id===_lineupMatchId);if(!m)return;const lines=id=>document.getElementById(id).value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const hs=lines('lineup-home-start'),as=lines('lineup-away-start');if(hs.length>11||as.length>11){toast('Starting XI can contain a maximum of 11 players per team');return;}m.lineups={home:{starting:hs,bench:lines('lineup-home-bench')},away:{starting:as,bench:lines('lineup-away-bench')}};saveState();renderAll();document.getElementById('lineup-modal').classList.add('hidden');toast('Starting XI and bench saved');showLocalNotification('📋 Lineups updated', `${m.home} vs ${m.away}: Starting XI and substitutes saved.`, `fuhsa-lineup-${m.id}-${Date.now()}`);});
     document.getElementById('close-lineup').addEventListener('click',()=>document.getElementById('lineup-modal').classList.add('hidden'));
     function removeEvent(matchId,eventId){const m=state.matches.find(x=>x.id===matchId);if(!m||!m.events)return;const ev=m.events.find(e=>e.id===eventId);if(!ev)return;const scoreTypes=['goal','penalty_scored','freekick_scored'];if(scoreTypes.includes(ev.type)){if(ev.team==='home')m.homeScore=Math.max(0,(Number(m.homeScore)||0)-1);else m.awayScore=Math.max(0,(Number(m.awayScore)||0)-1);}if(ev.type==='owngoal'){if(ev.team==='home')m.awayScore=Math.max(0,(Number(m.awayScore)||0)-1);else m.homeScore=Math.max(0,(Number(m.homeScore)||0)-1);}if(ev.type==='shootout_scored'){if(ev.team==='home')m.shootoutHome=Math.max(0,(m.shootoutHome||0)-1);else m.shootoutAway=Math.max(0,(m.shootoutAway||0)-1);}m.events=m.events.filter(e=>e.id!==eventId);saveState();renderAll();toast('Event removed');}
 
