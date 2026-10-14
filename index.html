@@ -36,6 +36,24 @@
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
     .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
+    /* Mobile-friendly navigation and compact, independently scrollable forms */
+    html { scroll-behavior: smooth; scroll-padding-top: 116px; }
+    body { overscroll-behavior-y: contain; }
+    nav { top: 0 !important; }
+    .tab-btn { min-height: 48px; }
+    #event-modal > div, #lineup-modal > div { max-height: 92dvh; display: flex; flex-direction: column; overflow: hidden; }
+    #event-modal > div > .p-5, #lineup-modal > div > .p-5 { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+    #event-modal > div > .px-5.py-4, #lineup-modal > div > .px-5.py-4 { flex: 0 0 auto; }
+    #event-modal .event-type-btn { min-height: 42px; line-height: 1.2; padding: .55rem .35rem; }
+    #event-modal .grid.grid-cols-2 { gap: .45rem; }
+    #btn-save-event, #btn-save-lineup { position: sticky; bottom: 0; box-shadow: 0 -6px 12px rgba(255,255,255,.9); flex-shrink: 0; }
+    @media (max-width: 640px) {
+      main { padding-left: .75rem !important; padding-right: .75rem !important; }
+      #event-modal, #lineup-modal { padding: .5rem; }
+      #event-modal > div, #lineup-modal > div { width: 100%; max-height: 94dvh; border-radius: 1rem 1rem .75rem .75rem; }
+      #event-modal > div > .p-5, #lineup-modal > div > .p-5 { padding: .85rem; gap: .75rem; }
+      #event-modal .event-type-btn { font-size: 11px; }
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen safe-bottom">
@@ -286,37 +304,65 @@
     </div>
   </div>
 
-  <!-- EVENT MODAL (Goal / Card / Match Period) -->
+  <!-- LINEUPS AND SUBSTITUTIONS -->
+  <div id="lineup-modal" class="fixed inset-0 bg-black/50 z-[54] hidden flex items-end sm:items-center justify-center p-3">
+    <div class="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+      <div class="px-5 py-4 border-b flex items-center justify-between"><h3 class="text-lg font-bold">Starting XI & Bench</h3><button id="close-lineup" class="text-slate-400 text-2xl">&times;</button></div>
+      <div class="p-5 space-y-4"><p id="lineup-match-label" class="text-sm text-slate-500"></p>
+        <div class="border rounded-xl p-3"><h4 id="lineup-home-title" class="font-bold mb-2">Home team</h4><label class="text-xs text-slate-500">Starting XI (one player per line; enter up to 11)</label><textarea id="lineup-home-start" rows="6" class="w-full border rounded-lg p-2 text-sm mt-1" placeholder="Player 1&#10;Player 2&#10;...&#10;Player 11"></textarea><label class="text-xs text-slate-500 block mt-2">Substitutes / bench (one per line)</label><textarea id="lineup-home-bench" rows="3" class="w-full border rounded-lg p-2 text-sm mt-1" placeholder="Substitute 1&#10;Substitute 2"></textarea></div>
+        <div class="border rounded-xl p-3"><h4 id="lineup-away-title" class="font-bold mb-2">Away team</h4><label class="text-xs text-slate-500">Starting XI (one player per line; enter up to 11)</label><textarea id="lineup-away-start" rows="6" class="w-full border rounded-lg p-2 text-sm mt-1" placeholder="Player 1&#10;Player 2&#10;...&#10;Player 11"></textarea><label class="text-xs text-slate-500 block mt-2">Substitutes / bench (one per line)</label><textarea id="lineup-away-bench" rows="3" class="w-full border rounded-lg p-2 text-sm mt-1" placeholder="Substitute 1&#10;Substitute 2"></textarea></div>
+        <button id="btn-save-lineup" class="w-full bg-primary-600 text-white font-semibold py-3 rounded-xl">Save Lineups</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EVENT MODAL (Goal / Card) -->
   <div id="event-modal" class="fixed inset-0 bg-black/50 z-[55] hidden flex items-end sm:items-center justify-center p-4">
     <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
       <div class="px-5 py-4 border-b flex items-center justify-between">
-        <h3 class="text-lg font-bold">Add Match Event</h3>
+        <h3 class="text-lg font-bold">Match Event</h3>
         <button id="close-event" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
       </div>
       <div class="p-5 space-y-4">
         <p id="event-match-label" class="text-sm text-slate-500 font-medium"></p>
         <div>
           <label class="text-xs font-medium text-slate-500">Type</label>
-          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
-            <button type="button" data-etype="goal" class="event-type-btn py-2.5 rounded-xl border-2 border-primary-500 bg-primary-50 text-primary-800 font-semibold text-sm">⚽ Goal</button>
-            <button type="button" data-etype="yellow" class="event-type-btn py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm">🟨 Yellow Card</button>
-            <button type="button" data-etype="red" class="event-type-btn py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm">🟥 Red Card</button>
-            <button type="button" data-etype="halftime" class="event-type-btn py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm">⏸️ Half-time</button>
-            <button type="button" data-etype="fulltime" class="event-type-btn py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm">🏁 Full-time</button>
+          <div class="grid grid-cols-2 gap-2 mt-1">
+            <button type="button" data-etype="goal" class="event-type-btn py-2 rounded-xl border-2 border-primary-500 bg-primary-50 text-primary-800 font-semibold text-xs">⚽ Goal</button>
+            <button type="button" data-etype="owngoal" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🥅 Own Goal</button>
+            <button type="button" data-etype="yellow" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🟨 Yellow Card</button>
+            <button type="button" data-etype="red" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🟥 Red Card</button>
+            <button type="button" data-etype="halftime" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">⏸ Half-time (45')</button>
+            <button type="button" data-etype="fulltime" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🏁 Full-time (90')</button>
+            <button type="button" data-etype="resume" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">▶ Resume 2nd Half (46')</button>
+            <button type="button" data-etype="shootout_start" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🎯 Start Penalty Shootout</button>
+            <button type="button" data-etype="shootout_fulltime" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🏁 Full-time After Shootout</button>
+            <button type="button" data-etype="substitution" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🔁 Substitution</button>
+            <button type="button" data-etype="penalty_awarded" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">⚠ Penalty Awarded</button>
+            <button type="button" data-etype="penalty_scored" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🥅 Penalty Scored</button>
+            <button type="button" data-etype="penalty_saved" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🧤 Penalty Saved</button>
+            <button type="button" data-etype="penalty_missed" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">❌ Penalty Missed</button>
+            <button type="button" data-etype="freekick_scored" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🎯 Free-kick Scored</button>
+            <button type="button" data-etype="shootout_scored" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">🥅 Shootout Scored</button>
+            <button type="button" data-etype="shootout_missed" class="event-type-btn py-2 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-xs">❌ Shootout Missed/Saved</button>
           </div>
         </div>
-        <div id="event-team-fields">
+        <div>
           <label class="text-xs font-medium text-slate-500">Team</label>
           <div class="flex gap-2 mt-1">
             <button type="button" id="event-team-home" class="event-team-btn flex-1 py-2.5 rounded-xl border-2 border-primary-500 bg-primary-50 text-primary-800 font-semibold text-sm truncate">Home</button>
             <button type="button" id="event-team-away" class="event-team-btn flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold text-sm truncate">Away</button>
           </div>
         </div>
-        <div id="event-player-fields">
+        <div>
           <label class="text-xs font-medium text-slate-500">Player Name</label>
           <input type="text" id="event-player" placeholder="e.g. Ahmed Musa" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
         </div>
-        <div id="event-minute-fields">
+        <div id="event-player-out-wrap" class="hidden">
+          <label class="text-xs font-medium text-slate-500">Player coming off</label>
+          <input type="text" id="event-player-out" placeholder="Name of player substituted off" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
+        </div>
+        <div>
           <label class="text-xs font-medium text-slate-500">Minute</label>
           <input type="number" id="event-minute" min="1" max="120" placeholder="e.g. 23" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
         </div>
@@ -561,24 +607,24 @@
         ? new Date(m.datetime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '';
 
-      // Events (goals, cards, half-time and full-time)
+      // Events (goals, cards)
       const events = m.events || [];
       let eventsHtml = '';
       if (events.length > 0) {
         eventsHtml = `<div class="mt-3 space-y-1 text-xs">` +
           events.map(e => {
-            const icon = e.type === 'goal' ? '⚽' : e.type === 'yellow' ? '🟨' : e.type === 'red' ? '🟥' : e.type === 'halftime' ? '⏸️' : '🏁';
-            const side = e.team === 'home' ? m.home : m.away;
-            const name = e.type === 'halftime' ? 'HALF-TIME' : e.type === 'fulltime' ? 'FULL-TIME' : (e.player || 'Unknown');
-            const isPeriodMarker = e.type === 'halftime' || e.type === 'fulltime';
+            const eventMeta = ({goal:['⚽','Goal'],owngoal:['🥅','Own goal'],yellow:['🟨','Yellow card'],red:['🟥','Red card'],halftime:['⏸','Half-time'],fulltime:['🏁','Full-time'],resume:['▶','Second half resumed'],shootout_start:['🎯','Penalty shootout started'],shootout_fulltime:['🏁','Full-time after penalty shootout'],substitution:['🔁','Substitution'],penalty_awarded:['⚠','Penalty awarded'],penalty_scored:['🥅','Penalty scored'],penalty_saved:['🧤','Penalty saved'],penalty_missed:['❌','Penalty missed'],freekick_scored:['🎯','Free-kick scored'],shootout_scored:['🥅','Shootout scored'],shootout_missed:['❌','Shootout missed/saved']})[e.type] || ['•',e.type];
+            const icon = eventMeta[0];
+            const side = e.team ? (e.team === 'home' ? m.home : m.away) : '';
+            const name = ({halftime:'Half-time',fulltime:'Full-time',resume:'Second half resumed',shootout_start:'Penalty shootout started',shootout_fulltime:'Full-time after penalty shootout'})[e.type] || (e.type === 'substitution' ? `${e.player || 'Player on'} for ${e.playerOut || 'player off'}` : (e.player || eventMeta[1]));
             const min = e.minute != null ? e.minute + "'" : '';
             const delBtn = state.isAdmin
               ? `<button onclick="removeEvent('${m.id}','${e.id}')" class="text-red-400 hover:text-red-600 ml-1 text-sm leading-none" title="Remove">✕</button>`
               : '';
-            return `<div class="flex items-center gap-1.5 ${isPeriodMarker ? 'font-bold text-primary-700' : 'text-slate-600'}">
+            return `<div class="flex items-center gap-1.5 text-slate-600">
               <span>${icon}</span>
               <span class="font-medium">${name}</span>
-              <span class="text-slate-400">(${side})</span>
+              ${side ? `<span class="text-slate-400">(${side})</span>` : ''}
               <span class="ml-auto tabular-nums">${min}</span>
               ${delBtn}
             </div>`;
@@ -604,12 +650,15 @@
               <p class="font-semibold text-sm sm:text-base truncate">${m.away}</p>
             </div>
           </div>
+          ${(m.shootoutHome != null || m.shootoutAway != null) ? `<div class="mt-2 text-center text-xs font-bold text-indigo-700">Penalty shootout: ${m.shootoutHome || 0} – ${m.shootoutAway || 0}</div>` : ''}
+          ${(m.lineups && (m.lineups.home.starting.length || m.lineups.away.starting.length)) ? `<div class="mt-2 text-xs text-slate-500">Lineups published · ${m.lineups.home.starting.length} / ${m.lineups.away.starting.length} starters listed</div>` : ''}
           ${eventsHtml}
           ${state.isAdmin ? `
             <div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
               <button onclick="setLive('${m.id}')" class="text-xs bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">Set Live</button>
               <button onclick="editMatch('${m.id}')" class="text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg font-medium">Edit</button>
-              <button onclick="openEventForm('${m.id}')" class="text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg font-medium">+ Goal / Card</button>
+              <button onclick="openEventForm('${m.id}')" class="text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg font-medium">+ Match Event</button>
+              <button onclick="openLineupForm('${m.id}')" class="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">Starting XI / Bench</button>
               <button onclick="deleteMatch('${m.id}')" class="text-xs bg-red-50 text-red-600 px-2.5 py-1 rounded-lg font-medium ml-auto">Delete</button>
             </div>
           ` : ''}
@@ -872,102 +921,74 @@
       }
     }
 
-    // ========== MATCH EVENTS (Goal / Card) ==========
+    // ========== LINEUPS, MATCH EVENTS & PENALTY SHOOTOUT ==========
     let _eventMatchId = null;
     let _eventType = 'goal';
     let _eventTeam = 'home';
-
-    function updateEventFields() {
-      const isPeriodMarker = _eventType === 'halftime' || _eventType === 'fulltime';
-      document.getElementById('event-team-fields').classList.toggle('hidden', isPeriodMarker);
-      document.getElementById('event-player-fields').classList.toggle('hidden', isPeriodMarker);
-      document.getElementById('event-minute-fields').classList.toggle('hidden', isPeriodMarker);
-      document.getElementById('btn-save-event').textContent =
-        _eventType === 'halftime' ? 'Record Half-time (45 min)' :
-        _eventType === 'fulltime' ? 'Record Full-time (90 min)' : 'Add Event';
-    }
-
+    const EVENT_LABELS = {goal:'Goal',owngoal:'Own goal',yellow:'Yellow card',red:'Red card',halftime:'Half-time',fulltime:'Full-time',resume:'Second half resumed',shootout_start:'Penalty shootout started',shootout_fulltime:'Full-time after penalty shootout',substitution:'Substitution',penalty_awarded:'Penalty awarded',penalty_scored:'Penalty scored',penalty_saved:'Penalty saved',penalty_missed:'Penalty missed',freekick_scored:'Free-kick scored',shootout_scored:'Shootout scored',shootout_missed:'Shootout missed/saved'};
+    const EVENT_ICONS = {goal:'⚽',owngoal:'🥅',yellow:'🟨',red:'🟥',halftime:'⏸',fulltime:'🏁',resume:'▶',shootout_start:'🎯',shootout_fulltime:'🏁',substitution:'🔁',penalty_awarded:'⚠',penalty_scored:'🥅',penalty_saved:'🧤',penalty_missed:'❌',freekick_scored:'🎯',shootout_scored:'🥅',shootout_missed:'❌'};
     function openEventForm(id) {
-      const m = state.matches.find(x => x.id === id);
-      if (!m) return;
-      _eventMatchId = id;
-      _eventType = 'goal';
-      _eventTeam = 'home';
-      updateEventFields();
-      document.getElementById('event-match-label').textContent = m.home + ' vs ' + m.away;
-      document.getElementById('event-team-home').textContent = m.home;
-      document.getElementById('event-team-away').textContent = m.away;
-      document.getElementById('event-player').value = '';
-      document.getElementById('event-minute').value = '';
-      // reset button styles
-      document.querySelectorAll('.event-type-btn').forEach(b => {
-        b.classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
-        b.classList.add('border-slate-200', 'text-slate-600');
-      });
-      document.querySelector('.event-type-btn[data-etype="goal"]').classList.add('border-primary-500', 'bg-primary-50', 'text-primary-800');
-      document.querySelector('.event-type-btn[data-etype="goal"]').classList.remove('border-slate-200', 'text-slate-600');
-      document.getElementById('event-team-home').classList.add('border-primary-500', 'bg-primary-50', 'text-primary-800');
-      document.getElementById('event-team-home').classList.remove('border-slate-200', 'text-slate-600');
-      document.getElementById('event-team-away').classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
-      document.getElementById('event-team-away').classList.add('border-slate-200', 'text-slate-600');
-      document.getElementById('event-modal').classList.remove('hidden');
+      const m = state.matches.find(x => x.id === id); if (!m) return;
+      _eventMatchId=id; _eventType='goal'; _eventTeam='home';
+      document.getElementById('event-match-label').textContent=m.home+' vs '+m.away;
+      document.getElementById('event-team-home').textContent=m.home; document.getElementById('event-team-away').textContent=m.away;
+      document.getElementById('event-player').value=''; document.getElementById('event-player-out').value=''; document.getElementById('event-minute').value='';
+      document.getElementById('event-team-home').click();
+      document.querySelectorAll('.event-type-btn').forEach(b=>{b.classList.remove('border-primary-500','bg-primary-50','text-primary-800');b.classList.add('border-slate-200','text-slate-600');});
+      const first=document.querySelector('.event-type-btn[data-etype="goal"]'); first.classList.add('border-primary-500','bg-primary-50','text-primary-800'); first.classList.remove('border-slate-200','text-slate-600');
+      updateEventFields(); document.getElementById('event-modal').classList.remove('hidden');
     }
-
+    function updateEventFields() {
+      const global=['halftime','fulltime','resume','shootout_start','shootout_fulltime'].includes(_eventType);
+      document.getElementById('event-player').parentElement.classList.toggle('hidden',global);
+      document.getElementById('event-player-out-wrap').classList.toggle('hidden',_eventType!=='substitution');
+      document.getElementById('event-team-home').parentElement.parentElement.classList.toggle('hidden',global);
+      const minute=document.getElementById('event-minute');
+      if(_eventType==='halftime'){minute.value=45;minute.disabled=true;} else if(_eventType==='resume'){minute.value=46;minute.disabled=true;} else if(_eventType==='fulltime'){minute.value=90;minute.disabled=true;} else if(_eventType==='shootout_start'||_eventType==='shootout_fulltime'){minute.value='';minute.disabled=true;} else {minute.disabled=false;if(!minute.value)minute.placeholder='e.g. 23';}
+      document.getElementById('btn-save-event').textContent=global?`Record ${EVENT_LABELS[_eventType]}`:'Add '+EVENT_LABELS[_eventType];
+    }
+    document.querySelectorAll('.event-type-btn').forEach(b=>b.addEventListener('click',()=>{
+      _eventType=b.dataset.etype;
+      document.querySelectorAll('.event-type-btn').forEach(x=>{x.classList.remove('border-primary-500','bg-primary-50','text-primary-800');x.classList.add('border-slate-200','text-slate-600');});
+      b.classList.add('border-primary-500','bg-primary-50','text-primary-800');b.classList.remove('border-slate-200','text-slate-600');updateEventFields();
+    }));
+    ['home','away'].forEach(side=>document.getElementById('event-team-'+side).addEventListener('click',()=>{
+      _eventTeam=side;['home','away'].forEach(s=>{const el=document.getElementById('event-team-'+s);el.classList.toggle('border-primary-500',s===side);el.classList.toggle('bg-primary-50',s===side);el.classList.toggle('text-primary-800',s===side);el.classList.toggle('border-slate-200',s!==side);el.classList.toggle('text-slate-600',s!==side);});
+    }));
     function saveEvent() {
-      const m = state.matches.find(x => x.id === _eventMatchId);
-      if (!m) return;
-      const isPeriodMarker = _eventType === 'halftime' || _eventType === 'fulltime';
-      const player = isPeriodMarker ? '' : (document.getElementById('event-player').value.trim() || 'Unknown');
-      const minute = _eventType === 'halftime' ? 45 : _eventType === 'fulltime' ? 90 :
-        (document.getElementById('event-minute').value ? Number(document.getElementById('event-minute').value) : null);
-
-      if (!m.events) m.events = [];
-      if (isPeriodMarker) m.events = m.events.filter(e => e.type !== _eventType);
-      m.events.push({ id: uid(), type: _eventType, team: isPeriodMarker ? null : _eventTeam, player, minute });
-
-      if (_eventType === 'goal') {
-        if (_eventTeam === 'home') m.homeScore = (Number(m.homeScore) || 0) + 1;
-        else m.awayScore = (Number(m.awayScore) || 0) + 1;
-        if (m.status === 'scheduled') m.status = 'live';
-      } else if (_eventType === 'halftime') {
-        m.status = 'live';
-      } else if (_eventType === 'fulltime') {
-        m.status = 'finished';
-      }
-
-      saveState();
-      renderAll();
-      document.getElementById('event-modal').classList.add('hidden');
-
-      const icon = _eventType === 'goal' ? '⚽' : _eventType === 'yellow' ? '🟨' : _eventType === 'red' ? '🟥' : _eventType === 'halftime' ? '⏸️' : '🏁';
-      const teamName = _eventTeam === 'home' ? m.home : m.away;
-      toast(isPeriodMarker ? `${icon} ${_eventType === 'halftime' ? 'Half-time' : 'Full-time'} recorded` : `${icon} ${player} (${teamName})`);
-      if (_eventType === 'goal') {
-        showLocalNotification('⚽ GOAL!', `${player} scores for ${teamName}! ${m.home} ${m.homeScore}–${m.awayScore} ${m.away}`);
-      } else if (_eventType === 'red') {
-        showLocalNotification('🟥 RED CARD', `${player} (${teamName}) sent off`);
-      } else if (isPeriodMarker) {
-        showLocalNotification(icon + ' ' + (_eventType === 'halftime' ? 'HALF-TIME' : 'FULL-TIME'), `${m.home} ${m.homeScore}–${m.awayScore} ${m.away}`);
-      }
+      const m=state.matches.find(x=>x.id===_eventMatchId);if(!m)return;
+      const global=['halftime','fulltime','resume','shootout_start','shootout_fulltime'].includes(_eventType);
+      const player=document.getElementById('event-player').value.trim();
+      const playerOut=document.getElementById('event-player-out').value.trim();
+      const minute=document.getElementById('event-minute').value?Number(document.getElementById('event-minute').value):null;
+      if(_eventType==='substitution'&&(!player||!playerOut)){toast('Enter both player coming on and player coming off');return;}
+      if(!global&&!player&&['goal','owngoal','yellow','red','penalty_scored','penalty_saved','penalty_missed','freekick_scored','shootout_scored','shootout_missed'].includes(_eventType)){toast('Enter the player name');return;}
+      if(!m.events)m.events=[];
+      const ev={id:uid(),type:_eventType,team:global?null:_eventTeam,player:player||null,playerOut:playerOut||null,minute:minute};m.events.push(ev);
+      const addsGoal=['goal','penalty_scored','freekick_scored'].includes(_eventType);
+      if(addsGoal){if(_eventTeam==='home')m.homeScore=(Number(m.homeScore)||0)+1;else m.awayScore=(Number(m.awayScore)||0)+1;if(m.status==='scheduled')m.status='live';}
+      if(_eventType==='owngoal'){if(_eventTeam==='home')m.awayScore=(Number(m.awayScore)||0)+1;else m.homeScore=(Number(m.homeScore)||0)+1;if(m.status==='scheduled')m.status='live';}
+      if(_eventType==='halftime'){m.status='live';m.period='Half-time';}
+      if(_eventType==='resume'){m.status='live';m.period='Second half';}
+      if(_eventType==='fulltime'){m.status='finished';m.period='Full-time';}
+      if(_eventType==='shootout_start'){m.status='live';m.period='Penalty shootout';if(m.shootoutHome==null)m.shootoutHome=0;if(m.shootoutAway==null)m.shootoutAway=0;}
+      if(_eventType==='shootout_scored'||_eventType==='shootout_missed'){if(m.shootoutHome==null)m.shootoutHome=0;if(m.shootoutAway==null)m.shootoutAway=0;if(_eventType==='shootout_scored'){if(_eventTeam==='home')m.shootoutHome++;else m.shootoutAway++;}m.status='live';m.period='Penalty shootout';}
+      if(_eventType==='shootout_fulltime'){m.status='finished';m.period='Full-time after penalty shootout';}
+      saveState();renderAll();document.getElementById('event-modal').classList.add('hidden');
+      const label=EVENT_LABELS[_eventType],teamName=global?'':(_eventTeam==='home'?m.home:m.away);
+      toast(`${EVENT_ICONS[_eventType]} ${label}${teamName?' · '+teamName:''}`);
+      if(addsGoal||_eventType==='owngoal')showLocalNotification('⚽ GOAL!',`${label}: ${player||'Unknown'} · ${m.home} ${m.homeScore}–${m.awayScore} ${m.away}`);
+      if(_eventType==='fulltime'||_eventType==='shootout_fulltime')showLocalNotification('🏁 FULL-TIME',`${m.home} ${m.homeScore}–${m.awayScore} ${m.away}${m.shootoutHome!=null?' · Shootout '+m.shootoutHome+'–'+m.shootoutAway:''}`);
     }
-
-    function removeEvent(matchId, eventId) {
-      const m = state.matches.find(x => x.id === matchId);
-      if (!m || !m.events) return;
-      const ev = m.events.find(e => e.id === eventId);
-      if (!ev) return;
-
-      // If it was a goal, decrease the score
-      if (ev.type === 'goal') {
-        if (ev.team === 'home') m.homeScore = Math.max(0, (Number(m.homeScore) || 0) - 1);
-        else m.awayScore = Math.max(0, (Number(m.awayScore) || 0) - 1);
-      }
-
-      m.events = m.events.filter(e => e.id !== eventId);
-      saveState();
-      renderAll();
-      toast('Event removed');
+    function openLineupForm(id){
+      const m=state.matches.find(x=>x.id===id);if(!m)return;_lineupMatchId=id;const l=m.lineups||{home:{starting:[],bench:[]},away:{starting:[],bench:[]}};
+      document.getElementById('lineup-match-label').textContent=m.home+' vs '+m.away;document.getElementById('lineup-home-title').textContent=m.home;document.getElementById('lineup-away-title').textContent=m.away;
+      document.getElementById('lineup-home-start').value=(l.home.starting||[]).join('\n');document.getElementById('lineup-home-bench').value=(l.home.bench||[]).join('\n');document.getElementById('lineup-away-start').value=(l.away.starting||[]).join('\n');document.getElementById('lineup-away-bench').value=(l.away.bench||[]).join('\n');document.getElementById('lineup-modal').classList.remove('hidden');
     }
+    let _lineupMatchId=null;
+    document.getElementById('btn-save-lineup').addEventListener('click',()=>{const m=state.matches.find(x=>x.id===_lineupMatchId);if(!m)return;const lines=id=>document.getElementById(id).value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const hs=lines('lineup-home-start'),as=lines('lineup-away-start');if(hs.length>11||as.length>11){toast('Starting XI can contain a maximum of 11 players per team');return;}m.lineups={home:{starting:hs,bench:lines('lineup-home-bench')},away:{starting:as,bench:lines('lineup-away-bench')}};saveState();renderAll();document.getElementById('lineup-modal').classList.add('hidden');toast('Starting XI and bench saved');});
+    document.getElementById('close-lineup').addEventListener('click',()=>document.getElementById('lineup-modal').classList.add('hidden'));
+    function removeEvent(matchId,eventId){const m=state.matches.find(x=>x.id===matchId);if(!m||!m.events)return;const ev=m.events.find(e=>e.id===eventId);if(!ev)return;const scoreTypes=['goal','penalty_scored','freekick_scored'];if(scoreTypes.includes(ev.type)){if(ev.team==='home')m.homeScore=Math.max(0,(Number(m.homeScore)||0)-1);else m.awayScore=Math.max(0,(Number(m.awayScore)||0)-1);}if(ev.type==='owngoal'){if(ev.team==='home')m.awayScore=Math.max(0,(Number(m.awayScore)||0)-1);else m.homeScore=Math.max(0,(Number(m.homeScore)||0)-1);}if(ev.type==='shootout_scored'){if(ev.team==='home')m.shootoutHome=Math.max(0,(m.shootoutHome||0)-1);else m.shootoutAway=Math.max(0,(m.shootoutAway||0)-1);}m.events=m.events.filter(e=>e.id!==eventId);saveState();renderAll();toast('Event removed');}
 
     function quickSave(id) {
       const inputs = document.querySelectorAll(`input[data-id="${id}"]`);
@@ -1241,7 +1262,6 @@
     document.querySelectorAll('.event-type-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         _eventType = btn.dataset.etype;
-        updateEventFields();
         document.querySelectorAll('.event-type-btn').forEach(b => {
           b.classList.remove('border-primary-500', 'bg-primary-50', 'text-primary-800');
           b.classList.add('border-slate-200', 'text-slate-600');
