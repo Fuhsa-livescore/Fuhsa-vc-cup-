@@ -156,6 +156,8 @@
         <span id="team-count" class="text-sm bg-primary-100 text-primary-800 px-2.5 py-1 rounded-full font-medium">12 teams</span>
       </div>
       <div id="teams-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+      <div class="mt-6 bg-white border rounded-xl p-4"><h3 class="font-bold mb-2">Tournament Squads (maximum 22 players per team)</h3><p class="text-xs text-slate-500 mb-3">Save each team’s squad before the tournament. Use one player per line; match lineups and event entry can then use these names.</p><div class="flex gap-2"><select id="squad-team" class="min-w-0 flex-1 border rounded-lg p-2 text-sm"></select><button id="squad-edit" class="bg-primary-600 text-white rounded-lg px-3 py-2 text-sm">Edit squad</button></div><div id="squad-summary" class="text-xs text-slate-500 mt-2"></div></div>
+      <div class="mt-6 bg-white border rounded-xl p-4"><h3 class="font-bold mb-3">Tournament Statistics</h3><div id="stats-table" class="space-y-2 text-sm"></div></div>
     </section>
   </main>
 
@@ -361,14 +363,18 @@
         </div>
         <div>
           <label class="text-xs font-medium text-slate-500">Player Name</label>
-          <input type="text" id="event-player" placeholder="e.g. Ahmed Musa" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
+          <input type="text" id="event-player" list="player-options" placeholder="Choose or type player name" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" /><datalist id="player-options"></datalist>
+        </div>
+        <div id="event-assist-wrap">
+          <label class="text-xs font-medium text-slate-500">Assist (optional — leave blank if none)</label>
+          <input type="text" id="event-assist" list="player-options" placeholder="Assisting player, if any" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
         </div>
         <div id="event-player-out-wrap" class="hidden">
           <label class="text-xs font-medium text-slate-500">Player coming off</label>
-          <input type="text" id="event-player-out" placeholder="Name of player substituted off" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
+          <input type="text" id="event-player-out" list="player-options" placeholder="Name of player substituted off" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
         </div>
         <div>
-          <label class="text-xs font-medium text-slate-500">Minute</label>
+          <label class="text-xs font-medium text-slate-500">Match minute (defaults to current clock; edit only to correct)</label>
           <input type="number" id="event-minute" min="1" max="120" placeholder="e.g. 23" class="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm mt-1" />
         </div>
         <button id="btn-save-event" class="w-full bg-primary-600 hover:bg-primary-700 text-white font-semibold py-3 rounded-xl">
@@ -423,6 +429,7 @@
     let state = {
       teams: [...DEFAULT_TEAMS],
       matches: [],
+      squads: {},
       isAdmin: false
     };
 
@@ -437,13 +444,14 @@
           const parsed = JSON.parse(saved);
           state.teams = parsed.teams || DEFAULT_TEAMS;
           state.matches = parsed.matches || [];
+          state.squads = parsed.squads || {};
         }
       } catch (e) { console.warn('Local cache could not be loaded', e); }
     }
 
     function saveState() {
-      const payload = { teams: state.teams, matches: state.matches, updatedAt: Date.now() };
-      localStorage.setItem('fuhsa_vc_cup_v1', JSON.stringify({teams:payload.teams,matches:payload.matches}));
+      const payload = { teams: state.teams, matches: state.matches, squads: state.squads || {}, updatedAt: Date.now() };
+      localStorage.setItem('fuhsa_vc_cup_v1', JSON.stringify({teams:payload.teams,matches:payload.matches,squads:state.squads || {}}));
       if (fbDb && fbAuth && fbAuth.currentUser && state.isAdmin && cloudReady) {
         cloudWritePending = true;
         fbDb.doc(CLOUD_DOC).set(payload).then(() => {
@@ -607,7 +615,7 @@
       return false;
     }
 
-    function showLocalNotification(title, body, tag = 'fuhsa-score') {
+    function showLocalNotification(title, body, tag = `fuhsa-${Date.now()}-${Math.random().toString(36).slice(2,7)}`) {
       if (notifPermission !== 'granted') return;
 
       // Prefer service worker notification (works better when app is in background)
@@ -641,6 +649,84 @@
       }
     });
 
+    // Match clock: stored as elapsed minutes plus timestamp, so it survives refreshes.
+    function clockElapsed(m){
+      if(m.status==='finished') return m.clockFinal != null ? m.clockFinal : (m.period==='Half-time'?45:90);
+      let base=Number(m.clockElapsed||0);
+      if(m.clockRunning && m.clockStartedAt) base+=(Date.now()-m.clockStartedAt)/60000;
+      if(m.period==='Second half') base+=45;
+      if(m.period==='Half-time') return 45;
+      if(m.period==='Full-time'||m.period==='Full-time after penalty shootout') return 90;
+      return Math.max(0,base);
+    }
+    function clockLabel(m){
+      const e=clockElapsed(m);
+      if(m.period==='Half-time') return '45:00 · HALF-TIME';
+      if(m.period==='Full-time'||m.period==='Full-time after penalty shootout'||m.status==='finished') return '90:00 · FULL-TIME';
+      const totalSeconds=Math.max(0,Math.floor(e*60));
+      const minute=Math.floor(totalSeconds/60), second=totalSeconds%60;
+      if(m.period==='Second half'){
+        if(e>=90) return `90+${Math.floor(e-90)}:${String(second).padStart(2,'0')}`;
+        return `${String(minute).padStart(2,'0')}:${String(second).padStart(2,'0')}`;
+      }
+      if(e>=45) return `45+${Math.floor(e-45)}:${String(second).padStart(2,'0')}`;
+      return `${String(minute).padStart(2,'0')}:${String(second).padStart(2,'0')}`;
+    }
+    function startClock(id){const m=state.matches.find(x=>x.id===id);if(!m)return;if(m.status==='scheduled'){m.status='live';m.period='First half';m.clockElapsed=0;}m.clockRunning=true;m.clockStartedAt=Date.now();saveState();renderAll();showLocalNotification('🔴 Match clock started',`${m.home} vs ${m.away} clock is running.`,`clock-start-${m.id}-${Date.now()}`);}
+    function pauseClock(id){const m=state.matches.find(x=>x.id===id);if(!m)return;if(m.clockRunning){m.clockElapsed=clockElapsed(m);m.clockRunning=false;m.clockStartedAt=null;}saveState();renderAll();}
+    function changeClock(id){
+      const m=state.matches.find(x=>x.id===id); if(!m)return;
+      const current=clockElapsed(m);
+      const mins=Math.floor(current);
+      const secs=Math.floor((current-mins)*60);
+      const old=document.getElementById('clock-edit-overlay'); if(old)old.remove();
+      const overlay=document.createElement('div');
+      overlay.id='clock-edit-overlay';
+      overlay.className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4';
+      overlay.innerHTML=`<div class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl text-slate-900">
+        <h2 class="text-lg font-bold mb-1">Edit match time</h2>
+        <p class="text-sm text-slate-600 mb-4">Enter the full match time. Seconds can be changed too.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="text-sm font-medium">Minutes
+            <input id="clock-edit-minutes" type="number" min="0" max="130" step="1" value="${mins}" class="mt-1 w-full rounded-lg border border-slate-300 p-3 text-lg">
+          </label>
+          <label class="text-sm font-medium">Seconds
+            <input id="clock-edit-seconds" type="number" min="0" max="59" step="1" value="${String(secs).padStart(2,'0')}" class="mt-1 w-full rounded-lg border border-slate-300 p-3 text-lg">
+          </label>
+        </div>
+        <p class="text-xs text-slate-500 mt-2">Example: 67 minutes and 35 seconds = 67:35.</p>
+        <div class="flex gap-2 justify-end mt-5">
+          <button id="clock-edit-cancel" class="rounded-lg border px-4 py-2">Cancel</button>
+          <button id="clock-edit-save" class="rounded-lg bg-blue-700 text-white px-4 py-2 font-semibold">Save time</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      document.getElementById('clock-edit-cancel').onclick=()=>overlay.remove();
+      overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+      document.getElementById('clock-edit-save').onclick=()=>{
+        const minEl=document.getElementById('clock-edit-minutes');
+        const secEl=document.getElementById('clock-edit-seconds');
+        const minText=minEl.value.trim(), secText=secEl.value.trim();
+        const minute=Number(minText), second=Number(secText);
+        if(minText===''||secText===''||!Number.isInteger(minute)||!Number.isInteger(second)||minute<0||minute>130||second<0||second>59){
+          toast('Enter minutes from 0–130 and seconds from 0–59');return;
+        }
+        const total=minute+second/60;
+        m.clockElapsed=m.period==='Second half'?Math.max(0,total-45):total;
+        m.clockStartedAt=m.clockRunning?Date.now():null;
+        saveState(); overlay.remove(); renderAll();
+        toast(`Match time set to ${minute}:${String(second).padStart(2,'0')}`);
+      };
+    }
+    setInterval(()=>{state.matches.filter(m=>m.status==='live'&&m.clockRunning).forEach(m=>{const el=document.getElementById('clock-'+m.id);if(el)el.textContent=clockLabel(m);});},1000);
+    function setManOfMatch(id){const m=state.matches.find(x=>x.id===id);if(!m)return;if(m.status!=='finished'&&!confirm('The match is not marked full-time. Set Man of the Match anyway?'))return;const names=[...(m.lineups?.home?.starting||[]),...(m.lineups?.home?.bench||[]),...(m.lineups?.away?.starting||[]),...(m.lineups?.away?.bench||[])];const value=prompt('Enter Man of the Match name:',m.manOfMatch||'');if(value===null)return;m.manOfMatch=value.trim()||null;saveState();renderAll();if(m.manOfMatch)showLocalNotification('🏅 Man of the Match',`${m.home} vs ${m.away}: ${m.manOfMatch}`,`motm-${m.id}-${Date.now()}`);toast('Man of the Match saved');}
+    function editEvent(matchId,eventId){const m=state.matches.find(x=>x.id===matchId),e=m?.events?.find(x=>x.id===eventId);if(!m||!e)return;const player=prompt('Player name:',e.player||'');if(player===null)return;const minute=prompt('Match minute:',e.minute==null?'':String(e.minute));if(minute===null)return;const assist=prompt('Assist (leave blank if none):',e.assist||'');if(assist===null)return;e.player=player.trim()||null;e.minute=minute===''?null:Number(minute);e.assist=assist.trim()||null;saveState();renderAll();toast('Event corrected');}
+    document.getElementById('squad-edit')?.addEventListener('click',()=>{if(!state.isAdmin){toast('Sign in as admin to edit squads');return;}const team=document.getElementById('squad-team').value;if(!team)return;const current=(state.squads[team]||[]).join('\n');const raw=prompt(`Enter the ${team} squad, one player per line (maximum 22):`,current);if(raw===null)return;const players=[...new Set(raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))];if(players.length>22){toast('Squad limit is 22 players');return;}state.squads[team]=players;saveState();renderSquadStats();toast(`${team} squad saved (${players.length}/22)`);});
+    function renderSquadStats(){const sum=document.getElementById('squad-summary');if(sum){const t=document.getElementById('squad-team')?.value;sum.textContent=t?`${(state.squads[t]||[]).length}/22 players saved for ${t}`:'';}
+      const goals={},assists={},cleans={};(state.matches||[]).forEach(m=>{if(m.status!=='finished')return;const ev=m.events||[];ev.forEach(e=>{if(['goal','penalty_scored','freekick_scored'].includes(e.type)&&e.player)goals[e.player]=(goals[e.player]||0)+1;if(e.assist)assists[e.assist]=(assists[e.assist]||0)+1;});if(Number(m.awayScore)===0)cleans[m.homeKeeper||'—']=(cleans[m.homeKeeper||'—']||0)+1;if(Number(m.homeScore)===0)cleans[m.awayKeeper||'—']=(cleans[m.awayKeeper||'—']||0)+1;});
+      const top=o=>Object.entries(o).filter(([n,v])=>n!=='—').sort((a,b)=>b[1]-a[1]).slice(0,5);const stats=document.getElementById('stats-table');if(stats)stats.innerHTML=`<div class="font-semibold">Top goalscorers</div>${top(goals).map(([n,v])=>`<div class="flex justify-between"><span>${n}</span><b>${v}</b></div>`).join('')||'<p class="text-slate-400">No recorded goals yet.</p>'}<div class="font-semibold mt-3">Top assists</div>${top(assists).map(([n,v])=>`<div class="flex justify-between"><span>${n}</span><b>${v}</b></div>`).join('')||'<p class="text-slate-400">No recorded assists yet.</p>'}<p class="text-xs text-slate-400 mt-2">Clean-sheet counts require goalkeeper names to be recorded for each match; the current app does not yet collect goalkeeper assignments.</p>`;}
+    document.getElementById('squad-team')?.addEventListener('change',renderSquadStats);
+
     // ===================== HELPERS =====================
     function toast(msg) {
       const t = document.getElementById('toast');
@@ -666,6 +752,7 @@
       renderBracket();
       renderTeams();
       populateTeamSelects();
+      renderSquadStats();
       renderQuickUpdate();
       document.getElementById('team-count').textContent = state.teams.length + ' teams';
       document.getElementById('btn-reset').classList.toggle('hidden', !state.isAdmin);
@@ -732,11 +819,11 @@
             const name = ({halftime:'Half-time',fulltime:'Full-time',resume:'Second half resumed',shootout_start:'Penalty shootout started',shootout_fulltime:'Full-time after penalty shootout'})[e.type] || (e.type === 'substitution' ? `${e.player || 'Player on'} for ${e.playerOut || 'player off'}` : (e.player || eventMeta[1]));
             const min = e.minute != null ? e.minute + "'" : '';
             const delBtn = state.isAdmin
-              ? `<button onclick="removeEvent('${m.id}','${e.id}')" class="text-red-400 hover:text-red-600 ml-1 text-sm leading-none" title="Remove">✕</button>`
+              ? `<button onclick="editEvent('${m.id}','${e.id}')" class="text-blue-500 ml-1 text-xs" title="Edit event">Edit</button><button onclick="removeEvent('${m.id}','${e.id}')" class="text-red-400 hover:text-red-600 ml-1 text-sm leading-none" title="Remove">✕</button>`
               : '';
             return `<div class="flex items-center gap-1.5 text-slate-600">
               <span>${icon}</span>
-              <span class="font-medium">${name}</span>
+              <span class="font-medium">${name}</span>${e.assist ? `<span class="text-slate-400">(Assist: ${e.assist})</span>` : ''}
               ${side ? `<span class="text-slate-400">(${side})</span>` : ''}
               <span class="ml-auto tabular-nums">${min}</span>
               ${delBtn}
@@ -764,7 +851,9 @@
             </div>
           </div>
           ${(m.shootoutHome != null || m.shootoutAway != null) ? `<div class="mt-2 text-center text-xs font-bold text-indigo-700">Penalty shootout: ${m.shootoutHome || 0} – ${m.shootoutAway || 0}</div>` : ''}
+          ${m.status === 'live' ? `<div class="mt-2 text-center"><span class="inline-block rounded-full bg-amber-50 text-amber-800 px-3 py-1 text-sm font-bold" id="clock-${m.id}">${clockLabel(m)}</span>${state.isAdmin ? `<div class="flex justify-center gap-2 mt-2"><button onclick="startClock('${m.id}')" class="text-xs border rounded-lg px-2 py-1">Start / Resume clock</button><button onclick="pauseClock('${m.id}')" class="text-xs border rounded-lg px-2 py-1">Pause</button><button onclick="changeClock('${m.id}')" class="text-xs border rounded-lg px-2 py-1">Edit time</button></div>` : ''}</div>` : ''}
           ${(m.lineups && (m.lineups.home.starting.length || m.lineups.away.starting.length)) ? `<div class="mt-2 text-xs text-slate-500">Lineups published · ${m.lineups.home.starting.length} / ${m.lineups.away.starting.length} starters listed</div>` : ''}
+          ${m.manOfMatch ? `<div class="mt-2 rounded-lg bg-amber-50 text-amber-900 px-3 py-2 text-xs font-semibold">🏅 Man of the Match: ${m.manOfMatch}</div>` : ''}
           ${eventsHtml}
           ${state.isAdmin ? `
             <div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
@@ -772,6 +861,7 @@
               <button onclick="editMatch('${m.id}')" class="text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg font-medium">Edit</button>
               <button onclick="openEventForm('${m.id}')" class="text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg font-medium">+ Match Event</button>
               <button onclick="openLineupForm('${m.id}')" class="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">Starting XI / Bench</button>
+              <button onclick="setManOfMatch('${m.id}')" class="text-xs bg-amber-50 text-amber-800 px-2.5 py-1 rounded-lg font-medium">Man of the Match</button>
               <button onclick="deleteMatch('${m.id}')" class="text-xs bg-red-50 text-red-600 px-2.5 py-1 rounded-lg font-medium ml-auto">Delete</button>
             </div>
           ` : ''}
@@ -930,6 +1020,7 @@
       const opts = state.teams.map(t => `<option value="${t}">${t}</option>`).join('');
       document.getElementById('m-home').innerHTML = opts;
       document.getElementById('m-away').innerHTML = opts;
+      const ss=document.getElementById('squad-team'); if(ss){const old=ss.value;ss.innerHTML=opts; if(state.teams.includes(old))ss.value=old;}
     }
 
     function renderQuickUpdate() {
@@ -1027,6 +1118,7 @@
       const m = state.matches.find(x => x.id === id);
       if (m) {
         m.status = 'live';
+        if(!m.clockRunning && !m.period){m.period='First half';m.clockElapsed=0;m.clockStartedAt=Date.now();m.clockRunning=true;}
         saveState();
         renderAll();
         toast(m.home + ' vs ' + m.away + ' is now LIVE');
@@ -1040,12 +1132,22 @@
     let _eventTeam = 'home';
     const EVENT_LABELS = {goal:'Goal',owngoal:'Own goal',yellow:'Yellow card',red:'Red card',halftime:'Half-time',fulltime:'Full-time',resume:'Second half resumed',shootout_start:'Penalty shootout started',shootout_fulltime:'Full-time after penalty shootout',substitution:'Substitution',penalty_awarded:'Penalty awarded',penalty_scored:'Penalty scored',penalty_saved:'Penalty saved',penalty_missed:'Penalty missed',freekick_scored:'Free-kick scored',shootout_scored:'Shootout scored',shootout_missed:'Shootout missed/saved'};
     const EVENT_ICONS = {goal:'⚽',owngoal:'🥅',yellow:'🟨',red:'🟥',halftime:'⏸',fulltime:'🏁',resume:'▶',shootout_start:'🎯',shootout_fulltime:'🏁',substitution:'🔁',penalty_awarded:'⚠',penalty_scored:'🥅',penalty_saved:'🧤',penalty_missed:'❌',freekick_scored:'🎯',shootout_scored:'🥅',shootout_missed:'❌'};
+    function updatePlayerOptions(m){
+      const names=[...(state.squads?.[m?.[_eventTeam==='home'?'home':'away']]||[]),
+        ...(m?.lineups?.[_eventTeam]?.starting||[]),...(m?.lineups?.[_eventTeam]?.bench||[])];
+      const unique=[...new Set(names.map(x=>String(x).trim()).filter(Boolean))];
+      const list=document.getElementById('player-options');
+      if(list) list.innerHTML=unique.map(n=>`<option value="${n.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}"></option>`).join('');
+    }
     function openEventForm(id) {
       const m = state.matches.find(x => x.id === id); if (!m) return;
       _eventMatchId=id; _eventType='goal'; _eventTeam='home';
+      const roster=[...(state.squads?.[m.home]||[]),...(state.squads?.[m.away]||[]),...(m.lineups?.home?.starting||[]),...(m.lineups?.home?.bench||[]),...(m.lineups?.away?.starting||[]),...(m.lineups?.away?.bench||[])];document.getElementById('player-options').innerHTML=[...new Set(roster)].map(n=>`<option value="${n.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"></option>`).join('');
       document.getElementById('event-match-label').textContent=m.home+' vs '+m.away;
       document.getElementById('event-team-home').textContent=m.home; document.getElementById('event-team-away').textContent=m.away;
-      document.getElementById('event-player').value=''; document.getElementById('event-player-out').value=''; document.getElementById('event-minute').value='';
+      document.getElementById('event-player').value=''; document.getElementById('event-player-out').value=''; document.getElementById('event-minute').value=''; document.getElementById('event-minute').placeholder='Current: '+Math.floor(clockElapsed(m))+' min (automatic)'; if(document.getElementById('event-assist'))document.getElementById('event-assist').value='';
+      // Populate suggestions for the selected team and refresh them when team changes.
+      updatePlayerOptions(m);
       document.getElementById('event-team-home').click();
       document.querySelectorAll('.event-type-btn').forEach(b=>{b.classList.remove('border-primary-500','bg-primary-50','text-primary-800');b.classList.add('border-slate-200','text-slate-600');});
       const first=document.querySelector('.event-type-btn[data-etype="goal"]'); first.classList.add('border-primary-500','bg-primary-50','text-primary-800'); first.classList.remove('border-slate-200','text-slate-600');
@@ -1055,6 +1157,7 @@
       const global=['halftime','fulltime','resume','shootout_start','shootout_fulltime'].includes(_eventType);
       document.getElementById('event-player').parentElement.classList.toggle('hidden',global);
       document.getElementById('event-player-out-wrap').classList.toggle('hidden',_eventType!=='substitution');
+      document.getElementById('event-assist-wrap').classList.toggle('hidden',!['goal','penalty_scored','freekick_scored'].includes(_eventType));
       document.getElementById('event-team-home').parentElement.parentElement.classList.toggle('hidden',global);
       const minute=document.getElementById('event-minute');
       if(_eventType==='halftime'){minute.value=45;minute.disabled=true;} else if(_eventType==='resume'){minute.value=46;minute.disabled=true;} else if(_eventType==='fulltime'){minute.value=90;minute.disabled=true;} else if(_eventType==='shootout_start'||_eventType==='shootout_fulltime'){minute.value='';minute.disabled=true;} else {minute.disabled=false;if(!minute.value)minute.placeholder='e.g. 23';}
@@ -1066,33 +1169,39 @@
       b.classList.add('border-primary-500','bg-primary-50','text-primary-800');b.classList.remove('border-slate-200','text-slate-600');updateEventFields();
     }));
     ['home','away'].forEach(side=>document.getElementById('event-team-'+side).addEventListener('click',()=>{
-      _eventTeam=side;['home','away'].forEach(s=>{const el=document.getElementById('event-team-'+s);el.classList.toggle('border-primary-500',s===side);el.classList.toggle('bg-primary-50',s===side);el.classList.toggle('text-primary-800',s===side);el.classList.toggle('border-slate-200',s!==side);el.classList.toggle('text-slate-600',s!==side);});
+      _eventTeam=side;updatePlayerOptions(state.matches.find(x=>x.id===_eventMatchId));['home','away'].forEach(s=>{const el=document.getElementById('event-team-'+s);el.classList.toggle('border-primary-500',s===side);el.classList.toggle('bg-primary-50',s===side);el.classList.toggle('text-primary-800',s===side);el.classList.toggle('border-slate-200',s!==side);el.classList.toggle('text-slate-600',s!==side);});
     }));
     function saveEvent() {
       const m=state.matches.find(x=>x.id===_eventMatchId);if(!m)return;
       const global=['halftime','fulltime','resume','shootout_start','shootout_fulltime'].includes(_eventType);
       const player=document.getElementById('event-player').value.trim();
       const playerOut=document.getElementById('event-player-out').value.trim();
-      const minute=document.getElementById('event-minute').value?Number(document.getElementById('event-minute').value):null;
+      const assist=(document.getElementById('event-assist')?.value || '').trim();
+      const minuteInput=document.getElementById('event-minute').value;
+      const currentElapsed=clockElapsed(m);
+      const minute=minuteInput!==''?Number(minuteInput):Math.floor(currentElapsed);
+      const second=(minuteInput!=='' && Number(minuteInput)!==Math.floor(currentElapsed))?0:Math.floor((currentElapsed-Math.floor(currentElapsed))*60);
+
       if(_eventType==='substitution'&&(!player||!playerOut)){toast('Enter both player coming on and player coming off');return;}
       if(!global&&!player&&['goal','owngoal','yellow','red','penalty_scored','penalty_saved','penalty_missed','freekick_scored','shootout_scored','shootout_missed'].includes(_eventType)){toast('Enter the player name');return;}
       if(!m.events)m.events=[];
-      const ev={id:uid(),type:_eventType,team:global?null:_eventTeam,player:player||null,playerOut:playerOut||null,minute:minute};m.events.push(ev);
+      const ev={id:uid(),type:_eventType,team:global?null:_eventTeam,player:player||null,assist:assist||null,playerOut:playerOut||null,minute:minute,second:second,clockLabel:clockLabel(m)};m.events.push(ev);
       const addsGoal=['goal','penalty_scored','freekick_scored'].includes(_eventType);
-      if(addsGoal){if(_eventTeam==='home')m.homeScore=(Number(m.homeScore)||0)+1;else m.awayScore=(Number(m.awayScore)||0)+1;if(m.status==='scheduled')m.status='live';}
-      if(_eventType==='owngoal'){if(_eventTeam==='home')m.awayScore=(Number(m.awayScore)||0)+1;else m.homeScore=(Number(m.homeScore)||0)+1;if(m.status==='scheduled')m.status='live';}
-      if(_eventType==='halftime'){m.status='live';m.period='Half-time';}
-      if(_eventType==='resume'){m.status='live';m.period='Second half';}
-      if(_eventType==='fulltime'){m.status='finished';m.period='Full-time';}
+      if(addsGoal){if(_eventTeam==='home')m.homeScore=(Number(m.homeScore)||0)+1;else m.awayScore=(Number(m.awayScore)||0)+1;if(m.status==='scheduled'){m.status='live';m.period='First half';m.clockElapsed=0;m.clockStartedAt=Date.now();m.clockRunning=true;}}
+      if(_eventType==='owngoal'){if(_eventTeam==='home')m.awayScore=(Number(m.awayScore)||0)+1;else m.homeScore=(Number(m.homeScore)||0)+1;if(m.status==='scheduled'){m.status='live';m.period='First half';m.clockElapsed=0;m.clockStartedAt=Date.now();m.clockRunning=true;}}
+      if(_eventType==='halftime'){m.status='live';m.period='Half-time';m.clockRunning=false;m.clockStartedAt=null;m.clockElapsed=45;m.clockFinal=45;}
+      if(_eventType==='resume'){m.status='live';m.period='Second half';m.clockElapsed=0;m.clockStartedAt=Date.now();m.clockRunning=true;m.clockFinal=null;}
+      if(_eventType==='fulltime'){m.status='finished';m.period='Full-time';m.clockRunning=false;m.clockStartedAt=null;m.clockFinal=90;}
       if(_eventType==='shootout_start'){m.status='live';m.period='Penalty shootout';if(m.shootoutHome==null)m.shootoutHome=0;if(m.shootoutAway==null)m.shootoutAway=0;}
       if(_eventType==='shootout_scored'||_eventType==='shootout_missed'){if(m.shootoutHome==null)m.shootoutHome=0;if(m.shootoutAway==null)m.shootoutAway=0;if(_eventType==='shootout_scored'){if(_eventTeam==='home')m.shootoutHome++;else m.shootoutAway++;}m.status='live';m.period='Penalty shootout';}
-      if(_eventType==='shootout_fulltime'){m.status='finished';m.period='Full-time after penalty shootout';}
+      if(_eventType==='shootout_fulltime'){m.status='finished';m.period='Full-time after penalty shootout';m.clockRunning=false;m.clockStartedAt=null;m.clockFinal=90;}
       saveState();renderAll();document.getElementById('event-modal').classList.add('hidden');
       const label=EVENT_LABELS[_eventType],teamName=global?'':(_eventTeam==='home'?m.home:m.away);
+      showLocalNotification(`${EVENT_ICONS[_eventType]} ${label}`, `${m.home} ${m.homeScore} – ${m.awayScore} ${m.away}${player ? ' · '+player : ''}${assist ? ' · Assist: '+assist : ''}${minute!=null ? ' · '+minute+"'"+(second!=null?String(second).padStart(2,'0')+'s':'') : ''}`, `fuhsa-${m.id}-${ev.id}`);
       toast(`${EVENT_ICONS[_eventType]} ${label}${teamName?' · '+teamName:''}`);
       // Notify for every recorded match event, not only goals/full-time.
       const eventTeamLabel = global ? '' : (_eventTeam === 'home' ? m.home : m.away);
-      const eventMinuteLabel = minute != null ? ` · ${minute}'` : '';
+      const eventMinuteLabel = minute != null ? ` · ${minute}'${String(second||0).padStart(2,'0')}s` : '';
       let eventBody = `${label}${eventTeamLabel ? ' · ' + eventTeamLabel : ''}${player ? ' · ' + player : ''}${_eventType === 'substitution' && playerOut ? ' off for ' + playerOut : ''}${eventMinuteLabel}. ${m.home} ${m.homeScore}–${m.awayScore} ${m.away}`;
       if (_eventType === 'shootout_scored' || _eventType === 'shootout_missed') eventBody += ` · Shootout ${m.shootoutHome || 0}–${m.shootoutAway || 0}`;
       showLocalNotification(`${EVENT_ICONS[_eventType] || '🔔'} ${label}`, eventBody, `fuhsa-event-${ev.id}`);
