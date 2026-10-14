@@ -13,6 +13,10 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase compat SDKs; paste your project's web config in FIREBASE_CONFIG below. -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -159,12 +163,13 @@
   <div id="password-modal" class="fixed inset-0 bg-black/60 z-[60] hidden flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6">
       <h3 class="text-lg font-bold mb-1">Admin Access</h3>
-      <p class="text-sm text-slate-500 mb-4">Enter password to manage matches & scores</p>
-      <input type="password" id="admin-password" placeholder="Password" class="w-full border border-slate-300 rounded-xl px-4 py-3 text-base mb-3 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-      <p id="password-error" class="text-red-500 text-sm mb-3 hidden">Wrong password</p>
+      <p class="text-sm text-slate-500 mb-4">Sign in with your authorized Firebase admin account.</p>
+      <input type="email" id="admin-email" placeholder="Admin email" autocomplete="username" class="w-full border border-slate-300 rounded-xl px-4 py-3 text-base mb-3 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+      <input type="password" id="admin-password" autocomplete="current-password" placeholder="Password" class="w-full border border-slate-300 rounded-xl px-4 py-3 text-base mb-3 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+      <p id="password-error" class="text-red-500 text-sm mb-3 hidden">Sign-in failed. Check your email and password.</p>
       <div class="flex gap-2">
         <button id="btn-password-cancel" class="flex-1 border border-slate-300 py-2.5 rounded-xl font-medium">Cancel</button>
-        <button id="btn-password-ok" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white py-2.5 rounded-xl font-semibold">Unlock</button>
+        <button id="btn-password-ok" class="flex-1 bg-primary-600 hover:bg-primary-700 text-white py-2.5 rounded-xl font-semibold">Sign in</button>
       </div>
     </div>
   </div>
@@ -392,7 +397,18 @@
 
   <script>
     // ===================== CONFIG =====================
-    const ADMIN_PASSWORD = 'fuhsa2026';   // ← Change this password if you want
+    // IMPORTANT: Replace every value below with the Web App config from Firebase Console > Project settings.
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCqi9ktENsEnPFTuBcuNvBYJBwGSBDQTBU",
+      authDomain: "fuhsa-live-score.firebaseapp.com",
+      projectId: "fuhsa-live-score",
+      storageBucket: "fuhsa-live-score.firebasestorage.app",
+      messagingSenderId: "361515805906",
+      appId: "1:361515805906:web:f21a2309c03a3a5eaad10b"
+    };
+    const FIREBASE_CONFIGURED = true;
+    let fbAuth = null, fbDb = null, cloudUnsubscribe = null, cloudReady = false, cloudWritePending = false, cloudDocExists = false;
+    const CLOUD_DOC = 'appData/liveState';
     const DEFAULT_TEAMS = [
       "Radiography", "Nursing", "MBBS", "Dentistry", "I.H",
       "Physiotherapy", "Optometry", "Nutrition", "Biostatistics",
@@ -422,14 +438,84 @@
           state.teams = parsed.teams || DEFAULT_TEAMS;
           state.matches = parsed.matches || [];
         }
-      } catch (e) { console.warn(e); }
+      } catch (e) { console.warn('Local cache could not be loaded', e); }
     }
 
     function saveState() {
-      localStorage.setItem('fuhsa_vc_cup_v1', JSON.stringify({
-        teams: state.teams,
-        matches: state.matches
-      }));
+      const payload = { teams: state.teams, matches: state.matches, updatedAt: Date.now() };
+      localStorage.setItem('fuhsa_vc_cup_v1', JSON.stringify({teams:payload.teams,matches:payload.matches}));
+      if (fbDb && fbAuth && fbAuth.currentUser && state.isAdmin && cloudReady) {
+        cloudWritePending = true;
+        fbDb.doc(CLOUD_DOC).set(payload).then(() => {
+          cloudWritePending = false;
+          setCloudStatus('Synced to all phones', true);
+        }).catch(err => {
+          cloudWritePending = false;
+          console.error('Firestore save failed:', err);
+          setCloudStatus('Cloud save failed — check Firebase rules and internet', false);
+          toast('Cloud save failed. Check Firebase setup.');
+        });
+      }
+    }
+
+    function setCloudStatus(message, ok) {
+      let el = document.getElementById('cloud-status');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'cloud-status';
+        el.className = 'mx-3 mt-2 mb-1 rounded-lg px-3 py-2 text-xs font-medium';
+        const header = document.querySelector('header');
+        if (header) header.insertAdjacentElement('afterend', el);
+      }
+      el.textContent = (ok ? '● ' : '⚠ ') + message;
+      el.className = 'mx-3 mt-2 mb-1 rounded-lg px-3 py-2 text-xs font-medium ' + (ok ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800');
+    }
+
+    function startFirebase() {
+      if (!FIREBASE_CONFIGURED) {
+        setCloudStatus('Firebase not configured yet — add your web app config to index.html', false);
+        return;
+      }
+      try {
+        if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+        fbAuth = firebase.auth(); fbDb = firebase.firestore();
+        fbAuth.onAuthStateChanged(user => {
+          state.isAdmin = !!user;
+          const btn = document.getElementById('btn-admin');
+          if (btn) btn.textContent = user ? 'Exit Admin' : 'Admin';
+          if (user) {
+            if (cloudReady && !cloudDocExists) { fbDb.doc(CLOUD_DOC).set({teams:state.teams,matches:state.matches,updatedAt:Date.now()}).then(() => { cloudDocExists = true; setCloudStatus('Initial data uploaded — live sync enabled', true); }).catch(err => { console.error(err); setCloudStatus('Could not initialize cloud data — check Firestore rules', false); }); }
+            document.getElementById('admin-modal').classList.remove('hidden');
+            document.getElementById('password-modal').classList.add('hidden');
+          } else {
+            document.getElementById('admin-modal').classList.add('hidden');
+          }
+          renderAll();
+        });
+        cloudUnsubscribe = fbDb.doc(CLOUD_DOC).onSnapshot(doc => {
+          if (doc.exists) {
+            cloudDocExists = true;
+            const data = doc.data() || {};
+            // Do not replace local state with an old snapshot while this admin's save is in flight.
+            if (!cloudWritePending) {
+              state.teams = Array.isArray(data.teams) ? data.teams : DEFAULT_TEAMS;
+              state.matches = Array.isArray(data.matches) ? data.matches : [];
+              localStorage.setItem('fuhsa_vc_cup_v1', JSON.stringify({teams:state.teams,matches:state.matches}));
+              renderAll();
+            }
+            cloudReady = true; setCloudStatus('Connected — live scores sync across phones', true);
+          } else {
+            cloudDocExists = false;
+            cloudReady = true; setCloudStatus('Connected — sign in as admin to initialize shared data', true);
+            if (fbAuth && fbAuth.currentUser && state.isAdmin) { fbDb.doc(CLOUD_DOC).set({teams:state.teams,matches:state.matches,updatedAt:Date.now()}).then(() => { cloudDocExists = true; }).catch(err => { console.error(err); setCloudStatus('Could not initialize cloud data — check Firestore rules', false); }); }
+          }
+        }, err => {
+          console.error('Firestore listener failed:', err);
+          setCloudStatus('Database connection blocked — check Firestore rules', false);
+        });
+      } catch (err) {
+        console.error('Firebase init failed:', err);
+        setCloudStatus('Firebase setup error — check web app config', false);
+      }
     }
 
     // ===================== PWA & NOTIFICATIONS =====================
@@ -1189,36 +1275,40 @@
 
     document.getElementById('filter-stage').addEventListener('change', renderFixtures);
 
-    // Admin with password
-    document.getElementById('btn-admin').addEventListener('click', () => {
-      if (state.isAdmin) {
-        // lock again
-        state.isAdmin = false;
-        document.getElementById('btn-admin').textContent = 'Admin';
-        document.getElementById('admin-modal').classList.add('hidden');
-        renderAll();
-        toast('Admin locked');
+    // Admin login uses Firebase Authentication (not a password hard-coded in the website).
+    document.getElementById('btn-admin').addEventListener('click', async () => {
+      if (fbAuth && fbAuth.currentUser) {
+        try { await fbAuth.signOut(); state.isAdmin = false; document.getElementById('btn-admin').textContent = 'Admin'; document.getElementById('admin-modal').classList.add('hidden'); renderAll(); toast('Admin signed out'); }
+        catch (e) { toast('Could not sign out'); }
         return;
       }
-      // show password modal
       document.getElementById('password-modal').classList.remove('hidden');
+      document.getElementById('admin-email').value = '';
       document.getElementById('admin-password').value = '';
       document.getElementById('password-error').classList.add('hidden');
-      setTimeout(() => document.getElementById('admin-password').focus(), 100);
+      setTimeout(() => document.getElementById('admin-email').focus(), 100);
     });
 
-    document.getElementById('btn-password-ok').addEventListener('click', () => {
+    document.getElementById('btn-password-ok').addEventListener('click', async () => {
+      const email = document.getElementById('admin-email').value.trim();
       const pw = document.getElementById('admin-password').value;
-      if (pw === ADMIN_PASSWORD) {
+      const error = document.getElementById('password-error');
+      error.classList.add('hidden');
+      if (!FIREBASE_CONFIGURED || !fbAuth) { error.textContent = 'Firebase is not configured yet. Follow FIREBASE-SETUP.md.'; error.classList.remove('hidden'); return; }
+      if (!email || !pw) { error.textContent = 'Enter your admin email and password.'; error.classList.remove('hidden'); return; }
+      const btn = document.getElementById('btn-password-ok'); btn.disabled = true; btn.textContent = 'Signing in…';
+      try {
+        await fbAuth.signInWithEmailAndPassword(email, pw);
         state.isAdmin = true;
         document.getElementById('btn-admin').textContent = 'Exit Admin';
         document.getElementById('password-modal').classList.add('hidden');
         document.getElementById('admin-modal').classList.remove('hidden');
-        renderAll();
-        toast('Admin unlocked');
-      } else {
-        document.getElementById('password-error').classList.remove('hidden');
-      }
+        renderAll(); toast('Admin signed in');
+      } catch (e) {
+        console.error('Admin sign-in failed:', e);
+        error.textContent = e.code === 'auth/invalid-credential' ? 'Email or password is incorrect.' : 'Sign-in failed: ' + (e.message || 'check Authentication setup');
+        error.classList.remove('hidden');
+      } finally { btn.disabled = false; btn.textContent = 'Sign in'; }
     });
 
     document.getElementById('admin-password').addEventListener('keydown', (e) => {
@@ -1309,6 +1399,7 @@
     // ===================== INIT =====================
     loadState();
     renderAll();
+    startFirebase();
 
     // Expose some functions for inline onclick
     window.setLive = setLive;
